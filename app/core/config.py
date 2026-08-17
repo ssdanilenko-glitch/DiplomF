@@ -9,9 +9,9 @@ import os
 class LLMSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LLM_")
 
-    openai_api_key: SecretStr = SecretStr("sk-test-placeholder")
-    base_url: str = "https://api.proxyapi.ru/openai/v1"
-    default_model: str = "gpt-5.4-mini"
+    openai_api_key: SecretStr = SecretStr("ollama")
+    base_url: str = "http://localhost:11434/v1"
+    default_model: str = "qwen3.5:9b"
     request_timeout: float = 30.0
     max_retries: int = 3
 
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     rag_data_dir: Path = Path("data/rag-block-03")
     rag_collection: str = "rag_block_03"
     rag_collection_bare: str = "rag_block_03_bare"
-    rag_llm_model: str = "gpt-5.4-mini"
+    rag_llm_model: str = "qwen3.5:9b"
     rag_top_k: int = 3
     rag_chunk_size: int = 512
     rag_chunk_overlap: int = 64
@@ -121,6 +121,11 @@ class Settings(BaseSettings):
     EXPRESS_BOT_ID: str = ""          # UUID
     EXPRESS_CTS_HOST: str = ""        # например, "cts.example.com"
     EXPRESS_SECRET_KEY: str = ""      # секретный ключ
+
+    # --- 1С:ITILIUM ---
+    ITILIUM_BASE_URL: str = ""  # например, "http://itilium-server/hs/"
+    ITILIUM_USERNAME: str = ""  # пользователь для API
+    ITILIUM_PASSWORD: SecretStr = SecretStr("")  # пароль
 
 @lru_cache
 def get_settings() -> Settings:

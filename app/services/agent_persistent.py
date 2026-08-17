@@ -218,3 +218,40 @@ async def agent_lifespan(
             yield build_agent(saver, model, tools, send_email_fn)
     else:
         raise ValueError(f"неизвестный AGENT_CHECKPOINTER: {backend!r}")
+# app/services/agent_persistent.py
+
+async def process_message(user_id: str, chat_id: str, text: str, platform: str = "telegram") -> dict:
+    """
+    Основная логика обработки сообщения.
+    Возвращает словарь с полями: answer, action, context, ticket_topic, service_uid и т.д.
+    """
+    # 1. RAG-поиск
+    rag_result = await rag_service.answer(text)
+
+    # 2. Если найден уверенный ответ — возвращаем его
+    if rag_result.get("confident", False):
+        return {
+            "answer": rag_result["answer"],
+            "attachments": rag_result.get("sources", []),
+            "action": None,
+        }
+
+    # 3. Если ответ не найден — готовим создание обращения
+    # Определяем сервис и категорию (можно через отдельный вызов API или эмбеддинги)
+    service_uid = await detect_service(text)  # ваша логика
+    category_uid = await detect_category(text)
+
+    return {
+        "answer": "Я не нашёл готового ответа. Создаю обращение в службу поддержки...",
+        "action": "create_ticket",
+        "context": {
+            "user_question": text,
+            "rag_attempt": rag_result.get("attempt", ""),
+            "platform": platform,
+            "user_id": user_id,
+        },
+        "ticket_topic": f"Вопрос от {user_id}: {text[:50]}...",
+        "ticket_description": text,
+        "service_uid": service_uid,
+        "category_uid": category_uid,
+    }

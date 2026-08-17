@@ -30,6 +30,9 @@ from app.services.vector_store import VectorStore
 from app.routers import express
 from app.routers.express import init_express_bot, shutdown_express_bot
 
+from app.services.itilium_client import ItiliumClient
+from app.routers import api
+
 logger = logging.getLogger("llm-service")
 logging.basicConfig(level=logging.INFO)
 
@@ -166,6 +169,17 @@ async def lifespan(app: FastAPI):
         logger.info("eXpress бот инициализирован")
     except Exception as e:
         logger.warning("eXpress бот не инициализирован (%s) — /express/webhook вернёт 503", e)
+
+    app.state.itilium_client = None
+    try:
+        client = ItiliumClient()
+        if await client.authenticate():
+            app.state.itilium_client = client
+            logger.info("1С:ITILIUM клиент инициализирован и аутентифицирован")
+        else:
+            logger.warning("1С:ITILIUM аутентификация не пройдена")
+    except Exception as e:
+        logger.warning(f"1С:ITILIUM клиент не инициализирован: {e}")
 
     # ===== ПРИЛОЖЕНИЕ ЗАПУЩЕНО =====
     yield
@@ -309,3 +323,4 @@ app.include_router(rag.router)
 app.include_router(documents.router)
 app.include_router(agent.router)
 app.include_router(express.router)       # добавлен роутер eXpress
+app.include_router(api.router)

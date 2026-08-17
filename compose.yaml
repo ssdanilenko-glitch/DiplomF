@@ -10,23 +10,23 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    # В environment кладём ТОЛЬКО те значения, которые в docker-сети
-    # отличаются от того, что пользователь ставит в .env (имена hosts).
-    # Остальное (токены, флаги, числовые настройки) читает pydantic-settings
-    # из .env с дефолтами в Settings.
     environment:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://chat:${POSTGRES_PASSWORD:-chat}@postgres:5432/chat
       BOT_URL: http://bot:9000
       QDRANT_URL: http://qdrant:6333
-      # Трейсинг включается флагом; эндпоинт указывает на сервис phoenix в сети compose.
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
+      LLM__BASE_URL: http://ollama:11434/v1
+      LLM__DEFAULT_MODEL: qwen3.5:9b
+      LLM__OPENAI_API_KEY: ollama
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
     healthcheck:
       test:
@@ -51,6 +51,7 @@ services:
       timeout: 3s
       retries: 3
 
+  # ----- Telegram-бот (если нужен) -----
   bot:
     build:
       context: .
@@ -60,19 +61,38 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    # В environment — только сетевые host'ы для docker-сети. Остальное
-    # (BOT_TOKEN, ADMIN_TOKEN, INTERNAL_TOKEN, BOT_ADMIN_IDS, ADMIN_CHAT_ID,
-    # BOT_API_PORT) читает pydantic-settings из .env.
     environment:
       BACKEND_URL: http://app:8000
-    # /notify нужен только из app-сервиса по внутренней сети compose,
-    # наружу не пробрасываем. Для отладки с хоста — добавить `ports: ["9000:9000"]`.
     expose:
       - "9000"
     depends_on:
       app:
         condition: service_healthy
     command: ["python", "-m", "bot"]
+
+  # ----- eXpress-бот (новый) -----
+  express_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llm-service:dev
+    container_name: express-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BACKEND_URL: http://app:8000
+      EXPRESS_BOT_ID: ${EXPRESS_BOT_ID}
+      EXPRESS_CTS_HOST: ${EXPRESS_CTS_HOST}
+      EXPRESS_SECRET_KEY: ${EXPRESS_SECRET_KEY}
+      # Опционально: порт для вебхука (если используется отдельный)
+      BOT_API_PORT: 9001
+    expose:
+      - "9001"
+    depends_on:
+      app:
+        condition: service_healthy
+    command: ["python", "-m", "express_bot"]   # модуль express_bot должен существовать
 
   postgres:
     image: postgres:16
@@ -108,8 +128,6 @@ services:
       retries: 5
       start_period: 10s
 
-  # Трейсинг RAG: UI + OTLP-приёмник на :6006. Спаны прилетают, только когда в
-  # app выставлен PHOENIX_ENABLED=true (по умолчанию трейсинг выключен).
   phoenix:
     image: arizephoenix/phoenix:latest
     container_name: llm-phoenix
@@ -119,8 +137,29 @@ services:
     volumes:
       - phoenix_data:/mnt/data
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Добавляем healthcheck, чтобы app мог дождаться готовности
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: >
+      sh -c "ollama serve & 
+             sleep 5 && 
+             ollama pull qwen3.5:9b && 
+             wait"
+
 volumes:
   redis_data:
   pg_data:
   qdrant_storage:
   phoenix_data:
+  ollama_data:
