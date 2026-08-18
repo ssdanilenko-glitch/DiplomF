@@ -20,8 +20,10 @@ from pybotx import (
     lifespan_wrapper,
 )
 
-from app.core.config import settings
-from app.services.agent_persistent import get_agent, process_message
+from app.core.config import get_settings
+
+settings = get_settings()
+from app.services.agent_persistent import process_message
 
 logger = logging.getLogger(__name__)
 
@@ -77,44 +79,29 @@ async def status_handler(message: IncomingMessage, bot: Bot) -> None:
 # ----------------------------------------------------------------------------
 # ОСНОВНОЙ ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ (вызов ИИ-агента)
 # ----------------------------------------------------------------------------
-
-@collector.default_handler
+@collector.default_message_handler
 async def default_handler(message: IncomingMessage, bot: Bot) -> None:
-    """
-    Обработчик всех остальных текстовых сообщений.
-    Здесь происходит вызов основного ИИ-агента (RAG + HIL + эскалация).
-    """
-    user_id = str(message.user.id)          # идентификатор пользователя в eXpress
-    chat_id = str(message.chat.id)          # идентификатор чата
+    user_id = str(message.user.id)
+    chat_id = str(message.chat.id)
     text = message.body
 
-    logger.info(f"Express message from {user_id} in {chat_id}: {text[:100]}...")
-
     try:
-        # 1. Вызов основного агента (ваша существующая логика из DZ6_4)
-        #    Функция process_message обрабатывает запрос через RAG, определяет сервис,
-        #    создаёт обращение в ITILIUM при необходимости и возвращает ответ.
         response = await process_message(
             user_id=user_id,
             chat_id=chat_id,
             text=text,
-            # можно передать дополнительные контекстные данные из eXpress
-            # например, имя пользователя, должность и т.д.
+            platform="express",
         )
 
-        # 2. Отправка ответа обратно в чат
-        await bot.answer_message(response.answer)
+        answer = response.get("answer", "")
+        await bot.answer_message(answer)
 
-        # 3. Если в ответе есть вложения (например, ссылка на обращение) — можно отправить их отдельно
-        if response.attachments:
-            for attachment in response.attachments:
-                await bot.answer_message(attachment)
+        for attachment in response.get("attachments", []):
+            await bot.answer_message(attachment)
 
     except Exception as e:
         logger.exception(f"Error processing message: {e}")
-        await bot.answer_message(
-            "⚠️ Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже или обратитесь в поддержку."
-        )
+        await bot.answer_message("⚠️ Произошла ошибка. Попробуйте позже.")
 
 # ============================================================================
 # 2. ИНИЦИАЛИЗАЦИЯ БОТА (аналог bot = Bot(...) в Telegram)

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ========== STAGE 1: BUILDER ==========
-FROM python:3.13-slim-bookworm AS builder
+FROM python:3.12-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -11,21 +11,19 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /uvx /bin/
 
 WORKDIR /app
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-dev
-
+# Копируем все исходники проекта
 COPY app/ ./app/
 COPY bot/ ./bot/
+COPY express_bot/ ./express_bot/
 COPY migrations/ ./migrations/
 COPY alembic.ini pyproject.toml uv.lock ./
 
+# Устанавливаем зависимости (без --frozen, чтобы uv подтянул актуальные версии из pyproject.toml)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --no-dev
 
 # ========== STAGE 2: RUNTIME ==========
-FROM python:3.13-slim-bookworm
+FROM python:3.12-slim
 
 RUN useradd --create-home --uid 1000 appuser
 

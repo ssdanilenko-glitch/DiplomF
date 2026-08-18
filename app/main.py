@@ -13,7 +13,6 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.admin.routes import router as admin_router
-from app.chat.routes import router as chat_router
 from app.core.config import get_settings
 from app.core.exceptions import (
     LLMAuthError,

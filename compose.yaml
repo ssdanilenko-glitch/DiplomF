@@ -146,17 +146,11 @@ services:
       - ollama_data:/root/.ollama
     # Добавляем healthcheck, чтобы app мог дождаться готовности
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-    command: >
-      sh -c "ollama serve & 
-             sleep 5 && 
-             ollama pull qwen3.5:9b && 
-             wait"
-
 volumes:
   redis_data:
   pg_data:
