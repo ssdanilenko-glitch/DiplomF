@@ -22,7 +22,7 @@ from app.core.exceptions import (
     LLMTimeoutError,
 )
 from app.observability import setup_tracing
-from app.routers import agent, chat, documents, health, models, rag
+from app.routers import agent, documents, health, models, rag
 from app.services.vector_store import VectorStore
 
 # Импорт модуля eXpress
@@ -31,6 +31,7 @@ from app.routers.express import init_express_bot, shutdown_express_bot
 
 from app.services.itilium_client import ItiliumClient
 from app.routers import api
+from app.agents.tools import build_create_ticket_tool
 
 logger = logging.getLogger("llm-service")
 logging.basicConfig(level=logging.INFO)
@@ -119,7 +120,20 @@ async def lifespan(app: FastAPI):
             e,
         )
 
+    # ===== ИНИЦИАЛИЗАЦИЯ КЛИЕНТА 1С:ITILIUM (ДО АГЕНТА) =====
+    app.state.itilium_client = None
+    try:
+        client = ItiliumClient()
+        if await client.authenticate():
+            app.state.itilium_client = client
+            logger.info("1С:ITILIUM клиент инициализирован и аутентифицирован")
+        else:
+            logger.warning("1С:ITILIUM аутентификация не пройдена")
+    except Exception as e:
+        logger.warning(f"1С:ITILIUM клиент не инициализирован: {e}")
+
     # ===== Агентный слой (LangGraph) =====
+    system_prompt = settings.SYSTEM_PROMPT or None
     app.state.agent_graph = None
     agent_stack = AsyncExitStack()
     try:
@@ -145,14 +159,18 @@ async def lifespan(app: FastAPI):
             logger.info("send_email → %s: %s", draft.get("to"), draft.get("subject"))
 
         agent_tools = [multiply, build_search_knowledge_base(_search_kb)]
+
+        # Передаём клиента ITILIUM и системный промпт в агента
         app.state.agent_graph = await agent_stack.enter_async_context(
             agent_lifespan(
-                settings.agent_checkpointer,
-                agent_model,
-                agent_tools,
-                _send_email,
+                backend=settings.agent_checkpointer,
+                model=agent_model,
+                tools=agent_tools,
+                send_email_fn=_send_email,
                 sqlite_path=settings.agent_sqlite_path,
                 postgres_url=settings.database_url,
+                itilium_client=app.state.itilium_client,   # <-- передаём
+                system_prompt=system_prompt,               # <-- передаём
             )
         )
         logger.info(
@@ -162,23 +180,15 @@ async def lifespan(app: FastAPI):
         app.state.agent_graph = None
         logger.warning("Агентный граф не собран (%s) — /agent/* вернут 503", e)
 
-    # ===== ИНИЦИАЛИЗАЦИЯ eXpress-БОТА =====
+    # ===== ИНИЦИАЛИЗАЦИЯ eXpress-БОТА (ПОСЛЕ АГЕНТА) =====
     try:
-        await init_express_bot()
+        await init_express_bot(
+            itilium_client=app.state.itilium_client,
+            agent_graph=app.state.agent_graph,
+        )
         logger.info("eXpress бот инициализирован")
     except Exception as e:
         logger.warning("eXpress бот не инициализирован (%s) — /express/webhook вернёт 503", e)
-
-    app.state.itilium_client = None
-    try:
-        client = ItiliumClient()
-        if await client.authenticate():
-            app.state.itilium_client = client
-            logger.info("1С:ITILIUM клиент инициализирован и аутентифицирован")
-        else:
-            logger.warning("1С:ITILIUM аутентификация не пройдена")
-    except Exception as e:
-        logger.warning(f"1С:ITILIUM клиент не инициализирован: {e}")
 
     # ===== ПРИЛОЖЕНИЕ ЗАПУЩЕНО =====
     yield
@@ -314,12 +324,11 @@ async def handle_validation(request: Request, exc: RequestValidationError):
 
 
 # ===== ПОДКЛЮЧЕНИЕ РОУТЕРОВ =====
-app.include_router(chat.router)
 app.include_router(admin_router)
 app.include_router(models.router)
 app.include_router(health.router)
 app.include_router(rag.router)
 app.include_router(documents.router)
 app.include_router(agent.router)
-app.include_router(express.router)       # добавлен роутер eXpress
+app.include_router(express.router)
 app.include_router(api.router)

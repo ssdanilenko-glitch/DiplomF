@@ -62,7 +62,9 @@ services:
     env_file:
       - .env
     environment:
-      BACKEND_URL: http://app:8000
+      BACKEND_URL:
+
+
     expose:
       - "9000"
     depends_on:

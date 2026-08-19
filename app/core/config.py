@@ -127,6 +127,8 @@ class Settings(BaseSettings):
     ITILIUM_USERNAME: str = ""  # пользователь для API
     ITILIUM_PASSWORD: SecretStr = SecretStr("")  # пароль
 
+    SYSTEM_PROMPT: str = ""
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
