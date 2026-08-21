@@ -43,3 +43,15 @@ class BackendClient:
             return response.status_code == 200
         except Exception:
             return False
+
+    async def resume_agent(self, thread_id: str, resume_value: bool) -> Dict[str, Any]:
+        """Возобновляет выполнение агента после interrupt'а."""
+        url = f"{self.base_url}/api/resume"
+        payload = {
+            "thread_id": thread_id,
+            "resume_value": resume_value,
+            "platform": "express",
+        }
+        response = await self.client.post(url, json=payload, timeout=settings.request_timeout)
+        response.raise_for_status()
+        return response.json()

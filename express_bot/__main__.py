@@ -10,6 +10,7 @@ from express_bot.config import get_bot_settings
 from express_bot.handlers import register_handlers
 from express_bot.services.backend import BackendClient
 from express_bot.web import build_api
+from express_bot.services.storage import StateStorage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,18 +32,17 @@ async def main() -> None:
         bot_accounts=[
             BotAccountWithSecret(
                 id=UUID(settings.express_bot_id),
-                host=settings.express_cts_host,
+                cts_url=settings.express_cts_host,  # <-- исправлено
                 secret_key=settings.express_secret_key.get_secret_value(),
             ),
         ],
     )
-
     # HTTP-клиент для бэкенда
     http_client = AsyncClient()
     backend = BackendClient(http_client)
 
     # Сохраняем backend в состоянии бота для доступа из обработчиков
-    bot.state["backend"] = backend
+    bot.state.backend = backend
 
     # FastAPI-приложение с вебхуком
     api = build_api(bot, settings.internal_token.get_secret_value())
@@ -60,6 +60,17 @@ async def main() -> None:
         settings.backend_url,
         settings.bot_api_port,
     )
+
+    # Инициализация хранилища (опционально)
+    try:
+        storage = StateStorage()
+        await storage.connect()
+        bot.state.storage = storage
+        log.info("Redis подключён")
+    except Exception as e:
+        log.warning(f"Redis не подключён: {e}. Функции состояний (подтверждения) будут недоступны.")
+        bot.state.storage = None
+
 
     try:
         # Запускаем инициализацию бота и веб-сервер

@@ -31,6 +31,12 @@ class ExpressBotSettings(BaseSettings):
     # --- Чат для алертов ---
     admin_chat_id: Optional[str] = None     # chat_id (строка)
 
+    # --- Redis для состояний ---
+    redis_url: str = "redis://localhost:6379/0"
+    redis_timeout: float = 2.0
+    state_ttl: int = 3600  # время жизни состояния в секундах
+
+
     @field_validator("bot_admin_ids", mode="before")
     @classmethod
     def _parse_ids(cls, v):

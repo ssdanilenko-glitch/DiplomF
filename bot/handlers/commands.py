@@ -1,5 +1,6 @@
 """Команды бота: /start, /help, /clear, /cancel."""
 
+import logging
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -8,23 +9,23 @@ from aiogram.types import Message
 from bot.services.backend_client import BackendClient
 
 router = Router(name="commands")
-
+log = logging.getLogger(__name__)
 
 @router.message(CommandStart())
+@router.message(CommandStart())
 async def cmd_start(
-    message: Message, backend: BackendClient, state: FSMContext
+    message: Message, state: FSMContext
 ) -> None:
     await state.clear()
-    # Прогреваем chat_id в backend, чтобы /clear / on_text потом не падали.
-    await backend.get_or_create_chat(
-        owner_external_id=str(message.chat.id),
-        interface="telegram",
-    )
-    await message.answer(
-        "Привет! Я подключён к chat-сервису. Пиши сообщения — я отвечу.\n"
-        "Команды: /help, /ask, /clear, /cancel"
-    )
-
+    try:
+        log.info(f"Обработчик /start вызван для пользователя {message.from_user.id}")
+        await message.answer(
+            "Привет! Я подключён к ИИ-агенту. Пиши сообщения — я отвечу.\n"
+            "Команды: /help, /ask, /cancel"
+        )
+        log.info(f"Ответ на /start отправлен пользователю {message.from_user.id}")
+    except Exception as e:
+        log.exception(f"Ошибка при отправке /start: {e}")
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
@@ -32,11 +33,9 @@ async def cmd_help(message: Message) -> None:
         "Доступные команды:\n"
         "/start — начать заново\n"
         "/ask — задать вопрос с выбором темы\n"
-        "/clear — очистить историю диалога\n"
         "/cancel — отменить текущий сценарий\n"
-        "/operator — передать диалог живому оператору\n"
         "\n"
-        "Для админов: /stats, /broadcast &lt;текст&gt;"
+        "Просто напиши свой вопрос — я обработаю его через ИИ-агента."
     )
 
 
@@ -50,16 +49,11 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
     await message.answer("Сценарий отменён.")
 
 
+# Команда /clear больше не нужна, так как история управляется агентом.
+# Оставляем только информативное сообщение.
 @router.message(Command("clear"))
-async def cmd_clear(
-    message: Message, backend: BackendClient, state: FSMContext
-) -> None:
-    await state.clear()
-    chat_id = await backend.get_or_create_chat(
-        owner_external_id=str(message.chat.id),
-        interface="telegram",
+async def cmd_clear(message: Message) -> None:
+    await message.answer(
+        "Очистка истории выполняется автоматически на стороне агента.\n"
+        "Если нужно сбросить диалог, используйте /start или начните новый вопрос."
     )
-    await backend.clear_messages(
-        chat_id, owner_external_id=str(message.chat.id)
-    )
-    await message.answer("История очищена.")

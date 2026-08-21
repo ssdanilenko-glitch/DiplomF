@@ -1,9 +1,8 @@
+# express_bot/handlers/commands.py
 import logging
-from uuid import UUID
-from pybotx import Bot, HandlerCollector, IncomingMessage, command
+from pybotx import Bot, HandlerCollector, IncomingMessage  # убрали command
 
 logger = logging.getLogger(__name__)
-
 
 def register(collector: HandlerCollector) -> None:
     @collector.command("/start", description="Начать работу")
@@ -31,8 +30,8 @@ def register(collector: HandlerCollector) -> None:
             return
 
         ticket_uid = args[1]
-        # Здесь будет запрос к backend
-        backend = bot.state.get("backend")
+        backend = bot.state.backend
+        logger.info(f"✅ Обработчик /start вызван для пользователя {message.user.id}")
         if backend:
             try:
                 status_info = await backend.get_ticket_status(ticket_uid)

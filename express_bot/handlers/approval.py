@@ -1,12 +1,11 @@
 # express_bot/handlers/approval.py
 import logging
-from pybotx import Bot, HandlerCollector, IncomingMessage  # ✅ Убрали command
+from pybotx import Bot, HandlerCollector, IncomingMessage  # убрали command
 
 logger = logging.getLogger(__name__)
 
-
 def register(collector: HandlerCollector) -> None:
-    @collector.command("/approve", description="Подтвердить или отклонить действие")  # ✅ collector.command
+    @collector.command("/approve", description="Подтвердить или отклонить действие")
     async def approve_handler(message: IncomingMessage, bot: Bot) -> None:
         args = message.body.strip().split()
         if len(args) < 2:
@@ -20,7 +19,12 @@ def register(collector: HandlerCollector) -> None:
 
         user_id = str(message.user.id)
 
-        storage = bot.state.storage if hasattr(bot.state, 'storage') else None
+        # Используем словарь bot.state
+        storage = getattr(bot.state, "storage", None)
+        if storage is None:
+            await bot.answer_message("❌ Хранилище недоступно. Попробуйте позже.")
+            return
+
         if not storage:
             await bot.answer_message("❌ Хранилище состояний недоступно.")
             return
@@ -31,7 +35,7 @@ def register(collector: HandlerCollector) -> None:
             return
 
         resume_value = (decision_text == "yes")
-        backend = bot.state.backend if hasattr(bot.state, 'backend') else None
+        backend = getattr(bot.state, "backend", None)
         if not backend:
             await bot.answer_message("❌ Бэкенд недоступен.")
             return

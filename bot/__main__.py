@@ -72,7 +72,6 @@ async def main() -> None:
     http = build_http_client(settings)
     backend = BackendClient(
         http,
-        admin_token=settings.admin_token.get_secret_value(),
         user_role=settings.user_role,
     )
     dp["backend"] = backend
