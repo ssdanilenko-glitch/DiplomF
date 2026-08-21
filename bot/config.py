@@ -7,9 +7,8 @@
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
-
+from pydantic import SecretStr, Field, field_validator
 
 class BotSettings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -17,7 +16,10 @@ class BotSettings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
-
+    telegram_proxy_url: str | None = Field(
+        default=None,
+        alias="TELEGRAM_PROXY_URL"
+    )
     bot_token: SecretStr
     backend_url: str = "http://app:8000"
     # NoDecode — отключаем штатный JSON-парсинг list[int] для env-переменной,
@@ -31,6 +33,7 @@ class BotSettings(BaseSettings):
     admin_token: SecretStr = SecretStr("change-me-admin")
     # Telegram chat_id админ-группы для алертов. None — drain отключён.
     admin_chat_id: int | None = None
+    user_role: str = "write-with-approve"
 
     @field_validator("bot_admin_ids", mode="before")
     @classmethod

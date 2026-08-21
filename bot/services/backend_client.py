@@ -1,16 +1,7 @@
-"""Тонкий async-клиент к chat-сервису.
-
-Бот не хранит истории/контекста — всё это есть на стороне backend.
-Здесь только операции: получить chat_id, отправить сообщение (SSE с
-опциональным media через multipart/form-data), очистить историю,
-оставить feedback, admin-команды (stats/handoff/alerts).
-
-Заголовок `X-Owner-External-Id` передаётся в каждом POST/DELETE-вызове,
-где есть владелец, — backend использует его для rate-limit.
-"""
+"""Клиент к единому API агента (/api/process)."""
 
 import json
-from collections.abc import AsyncIterator
+from typing import Any, Optional
 from uuid import UUID
 
 import httpx
@@ -18,18 +9,75 @@ import httpx
 
 class BackendClient:
     def __init__(
-        self, http: httpx.AsyncClient, admin_token: str = ""
+        self,
+        http: httpx.AsyncClient,
+        admin_token: str = "",
+        user_role: str = "write-with-approve",  # по умолчанию с подтверждением
     ) -> None:
         self.http = http
         self._admin_token = admin_token
+        self.user_role = user_role
 
-    # --- chat operations -------------------------------------------------
+    # ---------- НОВЫЙ МЕТОД для агента ----------
+    async def process_message(
+        self,
+        user_id: str,
+        chat_id: str,
+        text: str,
+        platform: str = "telegram",
+    ) -> dict:
+        """
+        Отправляет сообщение агенту через /api/process.
+        Возвращает словарь с полями:
+            answer, attachments, action, context, ticket_uid, need_approval
+        """
+        payload = {
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "text": text,
+            "platform": platform,
+        }
+        # Добавляем user_role в заголовки или в тело? Можно в configurable.
+        headers = {"X-User-Role": self.user_role}
+        r = await self.http.post(
+            "/api/process",
+            json=payload,
+            headers=headers,
+            timeout=120.0,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    # ---------- Методы для подтверждений (resume) ----------
+    async def resume_agent(
+        self,
+        thread_id: str,
+        resume_value: bool,
+        platform: str = "telegram",
+    ) -> dict:
+        """
+        Отправляет подтверждение (resume) для продолжения прерванного агента.
+        """
+        payload = {
+            "thread_id": thread_id,
+            "resume_value": resume_value,
+            "platform": platform,
+        }
+        r = await self.http.post(
+            "/api/resume",  # нужно добавить такой эндпоинт на бэкенде
+            json=payload,
+            timeout=60.0,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    # ---------- Остальные методы (для обратной совместимости) ----------
     async def get_or_create_chat(
         self,
         owner_external_id: str,
         interface: str,
     ) -> UUID:
-        """POST /chats; идемпотентно по (owner, interface)."""
+        """Оставлен для совместимости с /clear и feedback."""
         r = await self.http.post(
             "/chats",
             json={
@@ -40,52 +88,6 @@ class BackendClient:
         )
         r.raise_for_status()
         return UUID(r.json()["chat_id"])
-
-    async def send_message(
-        self,
-        chat_id: UUID,
-        content: str,
-        media: bytes | None = None,
-        mime: str | None = None,
-        filename: str = "file.bin",
-        owner_external_id: str | None = None,
-    ) -> AsyncIterator[dict]:
-        """POST /chats/{id}/messages multipart; парсит SSE, yields dict-события.
-
-        Backend отдаёт поток вида:
-            data: {"type":"token","delta":"..."}\\n\\n
-            data: {"type":"message_saved","message_id":"..."}\\n\\n
-            data: {"type":"done"}\\n\\n
-
-        Этот метод yield-ит ровно то, что пришло (без преобразования), пока
-        не встретит `done` — он завершает итерацию (не yield-ится).
-        Неизвестные `type` молча игнорируются — для forward compat.
-        """
-        data = {"content": content}
-        files = {"media": (filename, media, mime)} if media is not None else None
-        headers = (
-            {"X-Owner-External-Id": owner_external_id}
-            if owner_external_id
-            else {}
-        )
-        async with self.http.stream(
-            "POST",
-            f"/chats/{chat_id}/messages",
-            data=data,
-            files=files,
-            headers=headers,
-            timeout=120.0,
-        ) as r:
-            r.raise_for_status()
-            async for line in r.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                payload = json.loads(line.removeprefix("data: "))
-                ptype = payload.get("type")
-                if ptype == "done":
-                    return
-                if ptype in ("token", "message_saved"):
-                    yield payload
 
     async def clear_messages(
         self,
@@ -102,7 +104,6 @@ class BackendClient:
         )
         r.raise_for_status()
 
-    # --- feedback --------------------------------------------------------
     async def post_feedback(
         self,
         chat_id: UUID,
@@ -117,7 +118,7 @@ class BackendClient:
         )
         r.raise_for_status()
 
-    # --- admin -----------------------------------------------------------
+    # ---------- Админские методы (без изменений) ----------
     def _admin_headers(self) -> dict[str, str]:
         return {"X-Admin-Token": self._admin_token}
 
@@ -130,12 +131,7 @@ class BackendClient:
         r.raise_for_status()
         return r.json()
 
-    async def broadcast(
-        self, text: str, interface: str = "telegram"
-    ) -> dict:
-        """POST /chats/admin/broadcast. Backend сам подтянет owner_ids по
-        interface и серийно отправит каждому через bot:9000/notify.
-        """
+    async def broadcast(self, text: str, interface: str = "telegram") -> dict:
         r = await self.http.post(
             "/chats/admin/broadcast",
             json={"text": text, "interface": interface},
@@ -176,6 +172,5 @@ class BackendClient:
         )
         r.raise_for_status()
 
-    # --- lifecycle -------------------------------------------------------
     async def aclose(self) -> None:
         await self.http.aclose()

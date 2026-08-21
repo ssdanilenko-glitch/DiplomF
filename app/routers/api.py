@@ -1,8 +1,6 @@
-# app/routers/api.py
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from app.services.agent_persistent import process_with_ticket
-from app.services.itilium_client import ItiliumClient
+from app.services.agent_persistent import process_message
 
 router = APIRouter(prefix="/api", tags=["bot-api"])
 
@@ -19,28 +17,23 @@ class MessageResponse(BaseModel):
     context: dict | None = None
     ticket_uid: str | None = None
 
-async def get_itilium_client(request: Request) -> ItiliumClient:
-    return request.app.state.itilium_client
-
 @router.post("/process", response_model=MessageResponse)
 async def process_bot_message(
     req: MessageRequest,
-    itilium: ItiliumClient = Depends(get_itilium_client),
+    request: Request,
 ):
+    agent_graph = request.app.state.agent_graph
+    if agent_graph is None:
+        raise HTTPException(503, "Агент не инициализирован")
+
     try:
-        result = await process_with_ticket(
+        result = await process_message(
             user_id=req.user_id,
             chat_id=req.chat_id,
             text=req.text,
             platform=req.platform,
-            itilium_client=itilium,
+            agent_graph=agent_graph,
         )
-        return MessageResponse(
-            answer=result.get("answer", ""),
-            attachments=result.get("attachments", []),
-            action=result.get("action"),
-            context=result.get("context"),
-            ticket_uid=result.get("ticket_uid"),
-        )
+        return MessageResponse(**result)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, detail=str(e))

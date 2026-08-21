@@ -11,7 +11,7 @@ class LLMSettings(BaseSettings):
 
     openai_api_key: SecretStr = SecretStr("ollama")
     base_url: str = "http://localhost:11434/v1"
-    default_model: str = "qwen3.5:9b"
+    default_model: str = "qwen2.5:7b"
     request_timeout: float = 30.0
     max_retries: int = 3
 
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     rag_data_dir: Path = Path("data/rag-block-03")
     rag_collection: str = "rag_block_03"
     rag_collection_bare: str = "rag_block_03_bare"
-    rag_llm_model: str = "qwen3.5:9b"
+    rag_llm_model: str = "qwen2.5:7b"
     rag_top_k: int = 3
     rag_chunk_size: int = 512
     rag_chunk_overlap: int = 64
@@ -114,9 +114,10 @@ class Settings(BaseSettings):
     eval_judge_model: str = "gpt-5.4-mini"
 
     # === Telegram ===
-    TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")   # <-- исправлено
-    API_BASE_URL: str = os.getenv("API_BASE_URL", "http://app:8000")   # <-- исправлено
-    TELEGRAM_EDIT_DEBOUNCE_MS: int = int(os.getenv("TELEGRAM_EDIT_DEBOUNCE_MS", "800"))
+    BOT_ADMIN_IDS: str | None = os.getenv("BOT_ADMIN_IDS")
+    BOT_TOKEN: str | None = os.getenv("BOT_TOKEN")   # <-- исправлено
+    BACKEND_URL: str = os.getenv("API_BASE_URL", "http://app:8000")   # <-- исправлено
+    EDIT_DEBOUNCE_MS: int = int(os.getenv("EDIT_DEBOUNCE_MS", "800"))
 
     EXPRESS_BOT_ID: str = ""          # UUID
     EXPRESS_CTS_HOST: str = ""        # например, "cts.example.com"

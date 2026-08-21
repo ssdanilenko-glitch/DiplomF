@@ -17,8 +17,10 @@ services:
       QDRANT_URL: http://qdrant:6333
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
       LLM__BASE_URL: http://ollama:11434/v1
-      LLM__DEFAULT_MODEL: qwen3.5:9b
+      LLM__DEFAULT_MODEL: qwen2.5:7b
       LLM__OPENAI_API_KEY: ollama
+    volumes:
+      - ./var:/app/var
     depends_on:
       redis:
         condition: service_healthy
@@ -29,15 +31,57 @@ services:
       ollama:
         condition: service_healthy
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/ready', timeout=3).status == 200 else sys.exit(1)"
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/ready', timeout=3).status == 200 else sys.exit(1)"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  # Telegram-бот
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llm-service-bot:dev
+    container_name: chat-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BACKEND_URL: http://app:8000
+      # Прямой доступ к удаленному прокси. Не требует host.docker.internal
+      TELEGRAM_PROXY_URL: "http://local_user:p32kcF26NhWE@72.56.89.38:8888"
+    ports:
+      - "9000:9000"
+    expose:
+      - "9000"
+    depends_on:
+      app:
+        condition: service_healthy
+    command: ["python", "-m", "bot"]
+
+  # eXpress-бот
+  express_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llm-service-express:dev
+    container_name: express-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BACKEND_URL: http://app:8000
+      EXPRESS_BOT_ID: ${EXPRESS_BOT_ID}
+      EXPRESS_CTS_HOST: ${EXPRESS_CTS_HOST}
+      EXPRESS_SECRET_KEY: ${EXPRESS_SECRET_KEY}
+      BOT_API_PORT: 9001
+    expose:
+      - "9001"
+    depends_on:
+      app:
+        condition: service_healthy
+    command: ["python", "-m", "express_bot"]
 
   redis:
     image: redis:7.4-alpine
@@ -50,51 +94,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-
-  # ----- Telegram-бот (если нужен) -----
-  bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: llm-service:dev
-    container_name: chat-bot
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      BACKEND_URL:
-
-
-    expose:
-      - "9000"
-    depends_on:
-      app:
-        condition: service_healthy
-    command: ["python", "-m", "bot"]
-
-  # ----- eXpress-бот (новый) -----
-  express_bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: llm-service:dev
-    container_name: express-bot
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      BACKEND_URL: http://app:8000
-      EXPRESS_BOT_ID: ${EXPRESS_BOT_ID}
-      EXPRESS_CTS_HOST: ${EXPRESS_CTS_HOST}
-      EXPRESS_SECRET_KEY: ${EXPRESS_SECRET_KEY}
-      # Опционально: порт для вебхука (если используется отдельный)
-      BOT_API_PORT: 9001
-    expose:
-      - "9001"
-    depends_on:
-      app:
-        condition: service_healthy
-    command: ["python", "-m", "express_bot"]   # модуль express_bot должен существовать
 
   postgres:
     image: postgres:16
@@ -146,13 +145,13 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # Добавляем healthcheck, чтобы app мог дождаться готовности
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
 volumes:
   redis_data:
   pg_data:

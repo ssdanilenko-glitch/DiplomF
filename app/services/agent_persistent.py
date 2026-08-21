@@ -294,6 +294,8 @@ async def agent_lifespan(
 # Единая точка входа для обработки сообщений (вызов агента)
 # ============================================================================
 
+# app/services/agent_persistent.py (фрагмент функции process_message)
+
 async def process_message(
     user_id: str,
     chat_id: str,
@@ -301,27 +303,6 @@ async def process_message(
     platform: str = "telegram",
     agent_graph: Any = None,
 ) -> dict:
-    """
-    Отправляет сообщение агенту и возвращает результат.
-
-    Агент сам принимает решение: ответить из базы знаний, запросить уточнение
-    или создать обращение в ITILIUM через опасный инструмент.
-
-    Args:
-        user_id: идентификатор пользователя
-        chat_id: идентификатор чата
-        text: текст сообщения
-        platform: платформа (telegram, express, ...)
-        agent_graph: скомпилированный граф агента (обычно из app.state)
-
-    Returns:
-        dict с полями:
-            answer: текст ответа
-            attachments: список вложений (пока пустой)
-            action: None (устарело, оставлено для совместимости)
-            context: None
-            ticket_uid: None (в будущем можно извлекать из ответа)
-    """
     if agent_graph is None:
         return {
             "answer": "❌ Агент не инициализирован. Обратитесь к администратору.",
@@ -334,13 +315,20 @@ async def process_message(
     config = {
         "configurable": {
             "thread_id": f"{platform}_{user_id}_{chat_id}",
-            "user_role": "write-with-approve",  # можно переопределить через настройки
+            "user_role": "write-with-approve",
         }
     }
 
     try:
+        # Инициализируем полное состояние агента
         result = await agent_graph.ainvoke(
-            {"messages": [{"role": "user", "content": text}]},
+            {
+                "messages": [{"role": "user", "content": text}],
+                "iteration_count": 0,           # <-- добавляем
+                "tool_results": [],             # <-- добавляем
+                "pending_tool_call": None,      # <-- добавляем
+                "pending_tool_name": None,      # <-- добавляем
+            },
             config=config,
         )
         last_message = result["messages"][-1]

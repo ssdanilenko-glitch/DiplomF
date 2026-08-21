@@ -15,11 +15,14 @@ from . import admin, commands, feedback, fsm, handoff, media, text
 __all__ = ["register_routers"]
 
 
-def register_routers(dp: Dispatcher) -> None:
+from . import admin, commands, feedback, fsm, handoff, media, text , approval
+
+def register_routers(dp):
     dp.include_router(commands.router)
     dp.include_router(admin.router)
     dp.include_router(handoff.router)
-    dp.include_router(fsm.router)
-    dp.include_router(media.router)
     dp.include_router(feedback.router)
+    dp.include_router(fsm.router)
     dp.include_router(text.router)
+    dp.include_router(media.router)
+    dp.include_router(approval.router)  # новый

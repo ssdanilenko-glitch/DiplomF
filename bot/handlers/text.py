@@ -1,48 +1,62 @@
-"""Обработчик свободного текста (catch-all)."""
+"""Обработчик свободного текста (catch-all) через агента."""
 
-import asyncio
 import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.services.backend_client import BackendClient
 from bot.services.error_handling import handle_backend_error
-from bot.services.streaming import stream_to_chat
-from bot.services.typing import typing_until
 
 router = Router(name="text")
 log = logging.getLogger(__name__)
 
+# Хранилище для ожидающих подтверждений (thread_id -> user_id)
+# В реальном проекте лучше использовать Redis, но для демо подойдёт словарь.
+pending_approvals = {}
 
 @router.message(F.text & ~F.text.startswith("/"))
 async def on_text(
-    message: Message, backend: BackendClient, state: FSMContext
+    message: Message,
+    backend: BackendClient,
+    state: FSMContext,
 ) -> None:
-    # FSM имеет приоритет — если внутри сценария, отдаём обработку fsm-роутеру.
-    # Здесь страховочная проверка: fsm-роутер регистрируется выше text-роутера,
-    # так что в норме это не сработает.
     if await state.get_state() is not None:
-        return
+        return  # если FSM активен, не обрабатываем
 
-    chat_id = await backend.get_or_create_chat(
-        owner_external_id=str(message.chat.id),
-        interface="telegram",
-    )
-    stop = asyncio.Event()
-    typing_task = asyncio.create_task(
-        typing_until(message.bot, message.chat.id, stop)
-    )
     try:
-        events = backend.send_message(
-            chat_id,
-            message.text,
-            owner_external_id=str(message.chat.id),
+        result = await backend.process_message(
+            user_id=str(message.chat.id),
+            chat_id=str(message.chat.id),
+            text=message.text,
+            platform="telegram",
         )
-        await stream_to_chat(message, events, chat_id=chat_id)
+
+        answer = result.get("answer", "")
+
+        # Проверяем, требуется ли подтверждение
+        if result.get("need_approval"):
+            thread_id = result.get("thread_id")
+            if thread_id:
+                # Сохраняем thread_id для последующего resume
+                pending_approvals[str(message.chat.id)] = thread_id
+                # Показываем кнопки "Да / Нет"
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Да", callback_data="approve_yes"),
+                        InlineKeyboardButton(text="❌ Нет", callback_data="approve_no"),
+                    ]
+                ])
+                await message.answer(answer, reply_markup=kb)
+                return
+
+        # Если нет подтверждения — просто отправляем ответ
+        await message.answer(answer)
+
+        # Если есть вложения — отправляем их
+        for attachment in result.get("attachments", []):
+            await message.answer(attachment)
+
     except Exception as exc:
         await handle_backend_error(message, exc)
-    finally:
-        stop.set()
-        await typing_task
