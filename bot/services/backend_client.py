@@ -36,7 +36,7 @@ class BackendClient:
             "/api/process",
             json=payload,
             headers=headers,
-            timeout=120.0,
+            timeout=180.0,
         )
         r.raise_for_status()
         return r.json()

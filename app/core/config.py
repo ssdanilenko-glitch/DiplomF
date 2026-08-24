@@ -130,6 +130,20 @@ class Settings(BaseSettings):
 
     SYSTEM_PROMPT: str = ""
 
+   # --- Новые настройки для почты ---
+    yandex_email: str = "ya.ss-danilenko@yandex.ru"
+    yandex_app_password: SecretStr = SecretStr("")
+    exchange_recipient_email: str = "danilenko@ukbmz.ru"
+
+    ITILIUM_ENABLED: bool = False
+
+    # --- Новые настройки для почты ---
+    #smtp_host: str = "smtp.yandex.ru"
+    #smtp_port: int = 465
+    #smtp_user: str = ""
+    #smtp_password: SecretStr = SecretStr("")
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

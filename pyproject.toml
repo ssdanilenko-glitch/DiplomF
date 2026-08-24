@@ -35,6 +35,8 @@ dependencies = [
     "psycopg[binary,pool]>=3.2",
     "pybotx>=0.55.3",
     "httpx[socks]>=0.27.0",
+    "aiosmtplib>=2.0.0",
+    "aioimaplib>=1.0.0",
     
 ]
 

@@ -33,6 +33,8 @@ from app.services.itilium_client import ItiliumClient
 from app.routers import api
 from app.agents.tools import build_create_ticket_tool
 
+from app.services.email_service import get_email_service
+
 logger = logging.getLogger("llm-service")
 logging.basicConfig(level=logging.INFO)
 
@@ -155,9 +157,25 @@ async def lifespan(app: FastAPI):
             return await app.state.rag_service.answer(query)
 
         async def _send_email(draft: dict) -> None:
-            # Учебный side-effect: реальную отправку (SMTP/API) студент подключает сам.
-            logger.info("send_email → %s: %s", draft.get("to"), draft.get("subject"))
+            to = draft.get("to")
+            subject = draft.get("subject", "")
+            body = draft.get("body", "")
 
+            if not subject and not body:
+                logger.warning("send_email: пустое письмо, пропускаем")
+                return
+
+            email_service = get_email_service()
+            success = await email_service.send_message(
+                subject=subject,
+                body=body,
+                recipient=to,
+                is_html=False
+            )
+            if not success:
+                raise RuntimeError("Не удалось отправить письмо")
+            logger.info("Письмо отправлено на %s", to or email_service.recipient_email)
+            
         agent_tools = [multiply, build_search_knowledge_base(_search_kb)]
 
         # Передаём клиента ITILIUM и системный промпт в агента

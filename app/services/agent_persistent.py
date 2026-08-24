@@ -24,7 +24,7 @@ from langgraph.types import interrupt
 
 from app.services.itilium_client import ItiliumClient
 
-MAX_ITERATIONS = 6
+MAX_ITERATIONS = 3
 DANGEROUS_TOOLS = ["send_email", "create_itilium_ticket"]
 
 # Реальный side-effect отправки: async-callable, инжектируется в фабрику.
