@@ -61,6 +61,8 @@ async def on_question_received(
         )
 
         answer = result.get("answer", "")
+        if not answer:
+            answer = "⚠️ Ответ не получен. Попробуйте переформулировать вопрос."
         if result.get("need_approval"):
             thread_id = result.get("thread_id")
             if thread_id:

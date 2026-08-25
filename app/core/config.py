@@ -9,9 +9,9 @@ import os
 class LLMSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LLM_")
 
-    openai_api_key: SecretStr = SecretStr("ollama")
-    base_url: str = "http://localhost:11434/v1"
-    default_model: str = "qwen2.5:7b"
+    openai_api_key: SecretStr = SecretStr("")
+    base_url: str = "https://api.proxyapi.ru/openai/v1"
+    default_model: str = "gpt-4o-mini"
     request_timeout: float = 30.0
     max_retries: int = 3
 

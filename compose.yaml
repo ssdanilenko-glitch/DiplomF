@@ -16,9 +16,6 @@ services:
       BOT_URL: http://bot:9000
       QDRANT_URL: http://qdrant:6333
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
-      LLM__BASE_URL: http://ollama:11434/v1
-      LLM__DEFAULT_MODEL: qwen2.5:7b
-      LLM__OPENAI_API_KEY: ollama
     volumes:
       - ./var:/app/var
     depends_on:

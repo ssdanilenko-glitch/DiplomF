@@ -25,15 +25,13 @@ from app.observability import setup_tracing
 from app.routers import agent, documents, health, models, rag
 from app.services.vector_store import VectorStore
 
-# Импорт модуля eXpress
 from app.routers import express
 from app.routers.express import init_express_bot, shutdown_express_bot
 
 from app.services.itilium_client import ItiliumClient
 from app.routers import api
-from app.agents.tools import build_create_ticket_tool
 
-from app.services.email_service import get_email_service
+from app.agents.tools import build_all_tools
 
 logger = logging.getLogger("llm-service")
 logging.basicConfig(level=logging.INFO)
@@ -43,10 +41,10 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ===== Phoenix-трейсинг =====
+    # ===== 1. Phoenix-трейсинг =====
     app.state.tracing_enabled = setup_tracing(settings)
 
-    # ===== LLM-клиент (OpenAI-совместимый) =====
+    # ===== 2. LLM-клиент =====
     app.state.llm = AsyncOpenAI(
         api_key=settings.llm.openai_api_key.get_secret_value(),
         base_url=settings.llm.base_url,
@@ -54,7 +52,7 @@ async def lifespan(app: FastAPI):
         max_retries=settings.llm.max_retries,
     )
 
-    # ===== Redis (опционально) =====
+    # ===== 3. Redis (опционально) =====
     app.state.redis = None
     try:
         redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
@@ -63,7 +61,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Redis недоступен (%s) — продолжаем без кеша", e)
 
-    # ===== PostgreSQL (опционально) =====
+    # ===== 4. PostgreSQL (опционально) =====
     app.state.async_engine = None
     app.state.session_factory = None
     try:
@@ -71,76 +69,66 @@ async def lifespan(app: FastAPI):
         app.state.async_engine = engine
         app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
     except Exception as e:
-        logger.warning(
-            "Postgres engine не создан (%s) — postgres-репозиторий недоступен",
-            e,
-        )
+        logger.warning("Postgres engine не создан (%s)", e)
 
-    # ===== Qdrant (векторная БД) =====
+    # ===== 5. Qdrant (векторная БД) =====
     app.state.vector_store = None
     try:
         vector_store = VectorStore(
             url=settings.qdrant_url,
-            api_key=(
-                settings.qdrant_api_key.get_secret_value()
-                if settings.qdrant_api_key is not None
-                else None
-            ),
+            api_key=settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None,
             collection=settings.qdrant_collection,
             dim=settings.embedding_dim,
         )
         await vector_store.ensure_collection()
         app.state.vector_store = vector_store
-        logger.info(
-            "Qdrant подключён: %s, коллекция %s (dim=%d)",
-            settings.qdrant_url,
-            settings.qdrant_collection,
-            settings.embedding_dim,
-        )
+        logger.info("Qdrant подключён: %s, коллекция %s", settings.qdrant_url, settings.qdrant_collection)
     except Exception as e:
-        logger.warning("Qdrant недоступен (%s) — vector-роуты вернут 503", e)
+        logger.warning("Qdrant недоступен (%s)", e)
 
-    # ===== RAG / Индексация (LlamaIndex) =====
+    # ===== 6. RAG (условно, если включён в настройках) =====
+    # Добавьте в .env: RAG_ENABLED=true/false
+    rag_enabled = getattr(settings, "rag_enabled", False)
     app.state.ingestion_service = None
     app.state.rag_service = None
-    try:
-        from app.services.ingestion import IngestionService
-        from app.services.rag import RAGService
 
-        ingestion = IngestionService(settings)
-        app.state.ingestion_service = ingestion
-        if ingestion.is_collection_empty():
-            await asyncio.to_thread(ingestion.ingest_all)
+    if rag_enabled:
+        try:
+            from app.services.ingestion import IngestionService
+            from app.services.rag import RAGService
 
-        rag_service = RAGService(settings)
-        await asyncio.to_thread(rag_service.build)
-        app.state.rag_service = rag_service
-        logger.info("RAG-сервис готов (коллекция %s)", settings.rag_collection)
-    except Exception as e:
-        logger.warning(
-            "RAG/индексация не инициализированы (%s) — /rag/query и /documents вернут 503",
-            e,
-        )
+            ingestion = IngestionService(settings)
+            app.state.ingestion_service = ingestion
+            if ingestion.is_collection_empty():
+                await asyncio.to_thread(ingestion.ingest_all)
 
-    # ===== ИНИЦИАЛИЗАЦИЯ КЛИЕНТА 1С:ITILIUM (ДО АГЕНТА) =====
+            rag_service = RAGService(settings)
+            await asyncio.to_thread(rag_service.build)
+            app.state.rag_service = rag_service
+            logger.info("RAG-сервис готов (коллекция %s)", settings.rag_collection)
+        except Exception as e:
+            logger.warning("RAG/индексация не инициализированы (%s)", e)
+    else:
+        logger.info("RAG отключён настройками (RAG_ENABLED=false)")
+
+    # ===== 7. Клиент ITILIUM =====
     app.state.itilium_client = None
     try:
         client = ItiliumClient()
         if await client.authenticate():
             app.state.itilium_client = client
-            logger.info("1С:ITILIUM клиент инициализирован и аутентифицирован")
+            logger.info("1С:ITILIUM клиент инициализирован")
         else:
             logger.warning("1С:ITILIUM аутентификация не пройдена")
     except Exception as e:
-        logger.warning(f"1С:ITILIUM клиент не инициализирован: {e}")
+        logger.warning("1С:ITILIUM клиент не инициализирован: %s", e)
 
-    # ===== Агентный слой (LangGraph) =====
+    # ===== 8. Агент (LangGraph) =====
     system_prompt = settings.SYSTEM_PROMPT or None
     app.state.agent_graph = None
     agent_stack = AsyncExitStack()
     try:
         from langchain_openai import ChatOpenAI
-        from app.agents.tools import build_search_knowledge_base, multiply
         from app.services.agent_persistent import agent_lifespan
 
         agent_model = ChatOpenAI(
@@ -151,54 +139,38 @@ async def lifespan(app: FastAPI):
             timeout=settings.llm.request_timeout,
         )
 
-        async def _search_kb(query: str) -> dict:
-            if app.state.rag_service is None:
-                return {"answer": "База знаний недоступна.", "sources": [], "confident": False}
-            return await app.state.rag_service.answer(query)
+        # --- Функция поиска по базе знаний (если RAG включён) ---
+        if rag_enabled and app.state.rag_service is not None:
+            async def _search_kb(query: str) -> dict:
+                return await app.state.rag_service.answer(query)
+        else:
+            # Заглушка, если RAG отключён
+            async def _search_kb(query: str) -> dict:
+                return {"answer": "RAG отключён", "sources": [], "confident": False}
 
-        async def _send_email(draft: dict) -> None:
-            to = draft.get("to")
-            subject = draft.get("subject", "")
-            body = draft.get("body", "")
-
-            if not subject and not body:
-                logger.warning("send_email: пустое письмо, пропускаем")
-                return
-
-            email_service = get_email_service()
-            success = await email_service.send_message(
-                subject=subject,
-                body=body,
-                recipient=to,
-                is_html=False
-            )
-            if not success:
-                raise RuntimeError("Не удалось отправить письмо")
-            logger.info("Письмо отправлено на %s", to or email_service.recipient_email)
-            
-        agent_tools = [multiply, build_search_knowledge_base(_search_kb)]
-
-        # Передаём клиента ITILIUM и системный промпт в агента
+        # --- Создаём все инструменты через единую фабрику ---
+        agent_tools = build_all_tools(
+            search_fn=_search_kb,
+            itilium_client=app.state.itilium_client,
+        )
+        logger.info(f"🔧 Инструменты для агента: {[t.name for t in agent_tools]}")
+        # --- Собираем агента ---
         app.state.agent_graph = await agent_stack.enter_async_context(
             agent_lifespan(
                 backend=settings.agent_checkpointer,
                 model=agent_model,
                 tools=agent_tools,
-                send_email_fn=_send_email,
                 sqlite_path=settings.agent_sqlite_path,
                 postgres_url=settings.database_url,
-                itilium_client=app.state.itilium_client,   # <-- передаём
-                system_prompt=system_prompt,               # <-- передаём
+                system_prompt=system_prompt,
             )
         )
-        logger.info(
-            "Персистентный агент собран (backend=%s)", settings.agent_checkpointer
-        )
+        logger.info("Персистентный агент собран (backend=%s)", settings.agent_checkpointer)
     except Exception as e:
         app.state.agent_graph = None
-        logger.warning("Агентный граф не собран (%s) — /agent/* вернут 503", e)
+        logger.warning("Агентный граф не собран (%s)", e)
 
-    # ===== ИНИЦИАЛИЗАЦИЯ eXpress-БОТА (ПОСЛЕ АГЕНТА) =====
+    # ===== 9. eXpress-бот =====
     try:
         await init_express_bot(
             itilium_client=app.state.itilium_client,
@@ -206,19 +178,17 @@ async def lifespan(app: FastAPI):
         )
         logger.info("eXpress бот инициализирован")
     except Exception as e:
-        logger.warning("eXpress бот не инициализирован (%s) — /express/webhook вернёт 503", e)
+        logger.warning("eXpress бот не инициализирован (%s)", e)
 
-    # ===== ПРИЛОЖЕНИЕ ЗАПУЩЕНО =====
+    # ===== Приложение запущено =====
     yield
 
-    # ===== ЗАКРЫТИЕ eXpress-БОТА =====
+    # ===== Закрытие ресурсов =====
     try:
         await shutdown_express_bot()
-        logger.info("eXpress бот остановлен")
     except Exception as e:
         logger.warning("Ошибка при остановке eXpress бота: %s", e)
 
-    # ===== ЗАКРЫТИЕ ОСТАЛЬНЫХ РЕСУРСОВ =====
     await agent_stack.aclose()
 
     try:
@@ -257,7 +227,7 @@ async def lifespan(app: FastAPI):
             logger.exception("ошибка при закрытии индексатора")
 
 
-# ===== СОЗДАНИЕ ПРИЛОЖЕНИЯ FASTAPI =====
+# ===== Создание приложения FastAPI =====
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
@@ -265,7 +235,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ===== CORS =====
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -275,7 +244,7 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "X-LLM-Cost-USD"],
 )
 
-# ===== OBSERVABILITY MIDDLEWARE =====
+
 @app.middleware("http")
 async def observability_middleware(request: Request, call_next):
     request.state.request_id = request.headers.get("X-Request-ID", uuid.uuid4().hex)
@@ -303,8 +272,8 @@ async def observability_middleware(request: Request, call_next):
     return response
 
 
-# ===== ГЛОБАЛЬНЫЕ ОБРАБОТЧИКИ ИСКЛЮЧЕНИЙ =====
-_STATUS_MAP: list[tuple[type[LLMError], int, str]] = [
+# ===== Глобальные обработчики исключений =====
+_STATUS_MAP = [
     (LLMRateLimitError, 429, "llm_rate_limit"),
     (LLMAuthError, 502, "llm_auth_error"),
     (LLMTimeoutError, 504, "llm_timeout"),
@@ -341,7 +310,7 @@ async def handle_validation(request: Request, exc: RequestValidationError):
     )
 
 
-# ===== ПОДКЛЮЧЕНИЕ РОУТЕРОВ =====
+# ===== Подключение роутеров =====
 app.include_router(admin_router)
 app.include_router(models.router)
 app.include_router(health.router)
